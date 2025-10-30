@@ -1,0 +1,15 @@
+{
+  "name": "lord",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "license": "ISC",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.24.1",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0"
+  }
+}
