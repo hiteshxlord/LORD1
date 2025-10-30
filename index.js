@@ -148,118 +148,161 @@ function logAction(action, user, staff, reason, timestamp) {
   channel.send({ embeds: [embed] }).catch(() => {});
 }
 
-// === Slash command handler ===
+// === Slash command handler with proper error handling ===
 client.on('interactionCreate', async interaction => {
   if (!interaction.isChatInputCommand()) return;
+
   const { commandName } = interaction;
   const warnings = getWarnings();
   const timestamp = new Date().toLocaleString();
   const staffMember = interaction.user.tag;
 
-  // WARN
-  if (commandName === 'warn') {
-    const user = interaction.options.getUser('user');
-    const reason = interaction.options.getString('reason');
-    if (!warnings[user.id]) warnings[user.id] = [];
-    warnings[user.id].push({ reason, time: timestamp });
-    saveWarnings(warnings);
-    logAction('warn', user.id, staffMember, reason, timestamp);
+  try {
+    // WARN
+    if (commandName === 'warn') {
+      const user = interaction.options.getUser('user');
+      const reason = interaction.options.getString('reason');
 
-    const warnEmbed = new EmbedBuilder()
-      .setColor(0xFFA500)
-      .setTitle('⚠️ Warning Notice')
-      .addFields(
-        { name: 'Server', value: interaction.guild.name, inline: true },
-        { name: 'Reason', value: reason, inline: false },
-        { name: 'Time', value: timestamp, inline: false }
-      );
+      if (!warnings[user.id]) warnings[user.id] = [];
+      warnings[user.id].push({ reason, time: timestamp });
+      saveWarnings(warnings);
+      logAction('warn', user.id, staffMember, reason, timestamp);
 
-    try { await user.send({ embeds: [warnEmbed] }); } catch { console.log(`⚠️ Could not DM ${user.tag}`); }
+      const warnEmbed = new EmbedBuilder()
+        .setColor(0xFFA500)
+        .setTitle('⚠️ Warning Notice')
+        .addFields(
+          { name: 'Server', value: interaction.guild.name, inline: true },
+          { name: 'Reason', value: reason, inline: false },
+          { name: 'Time', value: timestamp, inline: false }
+        );
 
-    await interaction.reply(`<@${user.id}> has been warned for: **${reason}**`);
-  }
+      try {
+        await user.send({ embeds: [warnEmbed] });
+      } catch {
+        console.log(`⚠️ Could not DM ${user.tag}`);
+      }
 
-  // Warnings list
-  else if (commandName === 'warnings') {
-    const user = interaction.options.getUser('user');
-    const userWarnings = warnings[user.id] || [];
-    if (userWarnings.length === 0) return interaction.reply(`${user.tag} has no warnings.`);
-    const warnList = userWarnings.map((w, i) => `**${i + 1}.** ${w.reason} (${w.time})`).join('\n');
-    await interaction.reply({ content: `Warnings for ${user.tag}:\n${warnList}`, ephemeral: true });
-  }
+      await interaction.reply(`<@${user.id}> has been warned for: **${reason}**`);
+    }
 
-  // DELWARN
-  else if (commandName === 'delwarn') {
-    const user = interaction.options.getUser('user');
-    if (!warnings[user.id] || warnings[user.id].length === 0) return interaction.reply(`${user.tag} has no warnings.`);
-    const removed = warnings[user.id].pop();
-    saveWarnings(warnings);
-    logAction('delwarn', user.id, staffMember, removed.reason, timestamp);
-    await interaction.reply(`✅ Removed last warning from ${user.tag}: **${removed.reason}**`);
-  }
+    // WARNINGS
+    else if (commandName === 'warnings') {
+      const user = interaction.options.getUser('user');
+      const userWarnings = warnings[user.id] || [];
+      if (userWarnings.length === 0) {
+        await interaction.reply({ content: `${user.tag} has no warnings.`, ephemeral: true });
+        return;
+      }
+      const warnList = userWarnings.map((w, i) => `**${i + 1}.** ${w.reason} (${w.time})`).join('\n');
+      await interaction.reply({ content: `Warnings for ${user.tag}:\n${warnList}`, ephemeral: true });
+    }
 
-  // NICKNAME
-  else if (commandName === 'nickname') {
-    const user = interaction.options.getUser('user');
-    const nickname = interaction.options.getString('nickname');
-    const member = interaction.guild.members.cache.get(user.id);
-    if (!member) return interaction.reply('❌ User not found in guild.');
-    try { await member.setNickname(nickname); } catch { return interaction.reply('❌ Failed to change nickname.'); }
-    logAction('nickname', user.id, staffMember, nickname, timestamp);
-    await interaction.reply(`✅ Changed nickname of ${user.tag} to **${nickname}**`);
-  }
+    // DELWARN
+    else if (commandName === 'delwarn') {
+      const user = interaction.options.getUser('user');
+      if (!warnings[user.id] || warnings[user.id].length === 0) {
+        await interaction.reply({ content: `${user.tag} has no warnings.`, ephemeral: true });
+        return;
+      }
+      const removed = warnings[user.id].pop();
+      saveWarnings(warnings);
+      logAction('delwarn', user.id, staffMember, removed.reason, timestamp);
+      await interaction.reply(`✅ Removed last warning from ${user.tag}: **${removed.reason}**`);
+    }
 
-  // PURGE
-  else if (commandName === 'purge') {
-    const amount = interaction.options.getInteger('amount');
-    if (!interaction.member.permissions.has(PermissionsBitField.Flags.ManageMessages))
-      return interaction.reply('❌ You lack Manage Messages permission.');
-    if (amount < 1 || amount > 100)
-      return interaction.reply('Please choose a number between 1 and 100.');
+    // NICKNAME
+    else if (commandName === 'nickname') {
+      const user = interaction.options.getUser('user');
+      const nickname = interaction.options.getString('nickname');
+      const member = interaction.guild.members.cache.get(user.id);
+      if (!member) {
+        await interaction.reply('❌ User not found in guild.');
+        return;
+      }
+      try {
+        await member.setNickname(nickname);
+      } catch {
+        await interaction.reply('❌ Failed to change nickname.');
+        return;
+      }
+      logAction('nickname', user.id, staffMember, nickname, timestamp);
+      await interaction.reply(`✅ Changed nickname of ${user.tag} to **${nickname}**`);
+    }
 
-    const fetched = await interaction.channel.messages.fetch({ limit: amount });
-    const deleted = await interaction.channel.bulkDelete(fetched, true);
+    // PURGE
+    else if (commandName === 'purge') {
+      const amount = interaction.options.getInteger('amount');
+      if (!interaction.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
+        await interaction.reply('❌ You lack Manage Messages permission.');
+        return;
+      }
+      if (amount < 1 || amount > 100) {
+        await interaction.reply('Please choose a number between 1 and 100.');
+        return;
+      }
 
-    let attachmentCount = 0;
-    const messagesContent = [...fetched.values()]
-      .reverse()
-      .map(m => { attachmentCount += m.attachments.size; return `**${m.author.tag}:** ${m.content || (m.attachments.size ? '*[Attachment]*' : '*[Embed]*')}`; })
-      .join('\n')
-      .slice(0, 1900);
+      // Defer reply because bulkDelete might take a moment
+      await interaction.deferReply();
 
-    await interaction.reply(`🧹 Deleted **${deleted.size}** messages (${attachmentCount} attachments).`);
-    const logId = getLogChannel();
-    if (logId) {
-      const logChannel = client.channels.cache.get(logId);
-      if (logChannel) {
-        const embed = new EmbedBuilder()
-          .setColor(0xff9900)
-          .setTitle('🪵 PURGE Logged')
-          .addFields(
-            { name: 'Staff', value: staffMember, inline: true },
-            { name: 'Count', value: `${deleted.size}`, inline: true },
-            { name: 'Attachments', value: `${attachmentCount}`, inline: true },
-            { name: 'Channel', value: `<#${interaction.channel.id}>`, inline: false },
-            { name: 'Messages', value: messagesContent || '*No readable messages*', inline: false },
-            { name: 'Time', value: timestamp, inline: false }
-          )
-          .setFooter({ text: 'Snapshot of deleted messages' });
-        await logChannel.send({ embeds: [embed] });
+      const fetched = await interaction.channel.messages.fetch({ limit: amount });
+      const deleted = await interaction.channel.bulkDelete(fetched, true);
+
+      let attachmentCount = 0;
+      const messagesContent = [...fetched.values()]
+        .reverse()
+        .map(m => {
+          attachmentCount += m.attachments.size;
+          return `**${m.author.tag}:** ${m.content || (m.attachments.size ? '*[Attachment]*' : '*[Embed]*')}`;
+        })
+        .join('\n')
+        .slice(0, 1900);
+
+      await interaction.editReply(`🧹 Deleted **${deleted.size}** messages (${attachmentCount} attachments).`);
+
+      const logId = getLogChannel();
+      if (logId) {
+        const logChannel = client.channels.cache.get(logId);
+        if (logChannel) {
+          const embed = new EmbedBuilder()
+            .setColor(0xff9900)
+            .setTitle('🪵 PURGE Logged')
+            .addFields(
+              { name: 'Staff', value: staffMember, inline: true },
+              { name: 'Count', value: `${deleted.size}`, inline: true },
+              { name: 'Attachments', value: `${attachmentCount}`, inline: true },
+              { name: 'Channel', value: `<#${interaction.channel.id}>`, inline: false },
+              { name: 'Messages', value: messagesContent || '*No readable messages*', inline: false },
+              { name: 'Time', value: timestamp, inline: false }
+            )
+            .setFooter({ text: 'Snapshot of deleted messages' });
+          await logChannel.send({ embeds: [embed] });
+        }
       }
     }
-  }
 
-  // LOGS channel setup/view
-  else if (commandName === 'logs') {
-    const channel = interaction.options.getChannel('channel');
-    if (channel && channel.type === ChannelType.GuildText) {
-      setLogChannel(channel.id);
-      await interaction.reply(`✅ Log channel set to <#${channel.id}>`);
-    } else if (!channel) {
-      const logId = getLogChannel();
-      await interaction.reply(`📌 Current log channel: ${logId ? `<#${logId}>` : 'Not set'}`);
-    } else {
-      await interaction.reply('❌ Please provide a valid text channel.');
+    // LOGS channel setup/view
+    else if (commandName === 'logs') {
+      const channel = interaction.options.getChannel('channel');
+      if (channel && channel.type === ChannelType.GuildText) {
+        setLogChannel(channel.id);
+        await interaction.reply(`✅ Log channel set to <#${channel.id}>`);
+      } else if (!channel) {
+        const logId = getLogChannel();
+        await interaction.reply(`📌 Current log channel: ${logId ? `<#${logId}>` : 'Not set'}`);
+      } else {
+        await interaction.reply('❌ Please provide a valid text channel.');
+      }
+    }
+
+    // Add handlers for other commands (kick, ban, tempban, temprole) here if you want.
+
+  } catch (error) {
+    console.error('Error handling command:', error);
+    if (!interaction.replied && !interaction.deferred) {
+      await interaction.reply({ content: '❌ An error occurred while executing that command.', ephemeral: true });
+    } else if (interaction.deferred && !interaction.replied) {
+      await interaction.editReply('❌ An error occurred while executing that command.');
     }
   }
 });
